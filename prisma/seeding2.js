@@ -70,7 +70,6 @@ async function main() {
     update: {},
     create: {
       email: "new@helix.com",
-      onboardingStep: 0,
       // No Role, No Gender, No Terms yet
     },
   });
@@ -80,10 +79,9 @@ async function main() {
   // Use this to test: Login -> Redirect to Profile Completion Stage 1
   await prisma.user.upsert({
     where: { email: "onboarded@helix.com" },
-    update: { onboardingStep: 0 },
+    update: {},
     create: {
       email: "onboarded@helix.com",
-      onboardingStep: 0,
       // Onboarding Completed
       termsAccepted: true,
       gender: "WOMAN",
@@ -101,10 +99,9 @@ async function main() {
   // --- STATE C: Partially Completed Profile (Stage 2) ---
   await prisma.user.upsert({
     where: { email: "partial@helix.com" },
-    update: { onboardingStep: 2 },
+    update: {},
     create: {
       email: "partial@helix.com",
-      onboardingStep: 2,
       // Onboarding
       termsAccepted: true,
       gender: "MAN",
@@ -139,10 +136,9 @@ async function main() {
   // Use this to test: Dashboard / Swiping
   await prisma.user.upsert({
     where: { email: "complete@helix.com" },
-    update: { onboardingStep: 6 },
+    update: {},
     create: {
       email: "complete@helix.com",
-      onboardingStep: 6,
       // Onboarding
       termsAccepted: true,
       gender: "MAN",
@@ -224,8 +220,7 @@ async function main() {
         email: faker.internet.email({ firstName, lastName }),
         role: "DONOR",
         serviceType: "DONOR_SERVICES",
-        onboardingStep: 6,
-        
+
         // STAGE 1 & 2: PROFILE
         profile: {
           create: {

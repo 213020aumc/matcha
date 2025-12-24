@@ -131,6 +131,8 @@ model User {
 
   profileStatus ProfileStatus @default(DRAFT)
 
+  onboardingStep Int @default(0)
+
   // Profile Completion Relations (One-to-One)
   profile      UserProfile?
   health       UserHealth?

@@ -19,9 +19,17 @@ export const submitOnboarding = catchAsync(async (req, res, next) => {
   });
 });
 
-// --- STAGE 1 ---
+// --- STAGE 1: Basics ---
 export const updateBasicInfo = catchAsync(async (req, res, next) => {
-  const result = await ProfileService.upsertBasicInfo(req.user.id, req.body);
+  // Extract isComplete flag to see if user clicked "Next"
+  const { isComplete, ...data } = req.body;
+
+  const result = await ProfileService.upsertBasicInfo(
+    req.user.id,
+    data,
+    isComplete === "true" || isComplete === true
+  );
+
   res.status(200).json({ status: "success", data: result });
 });
 
@@ -33,6 +41,7 @@ export const uploadIdentityDoc = catchAsync(async (req, res, next) => {
   // Helper handles S3 vs Local logic automatically
   const fileUrl = getFileUrl(req, req.file);
 
+  // Note: Identity Doc upload usually doesn't complete the whole stage by itself
   const result = await ProfileService.saveIdentityDoc(
     req.user.id,
     req.body.type,
@@ -43,6 +52,7 @@ export const uploadIdentityDoc = catchAsync(async (req, res, next) => {
 
 export const uploadPhotos = catchAsync(async (req, res, next) => {
   const photoUrls = {};
+  const { isComplete } = req.body;
 
   // Helper handles S3 vs Local logic automatically
   if (req.files?.["baby"]?.[0]) {
@@ -54,44 +64,55 @@ export const uploadPhotos = catchAsync(async (req, res, next) => {
 
   const result = await ProfileService.updateProfilePhotos(
     req.user.id,
-    photoUrls
+    photoUrls,
+    isComplete === "true" || isComplete === true
   );
   res.status(200).json({ status: "success", data: result });
 });
 
-// --- STAGE 2 ---
+// --- STAGE 2: Background ---
 export const updateBackground = catchAsync(async (req, res, next) => {
+  const { isComplete, ...data } = req.body;
+
   const result = await ProfileService.updateBackgroundInfo(
     req.user.id,
-    req.body
+    data,
+    isComplete === "true" || isComplete === true
   );
   res.status(200).json({ status: "success", data: result });
 });
 
-// --- STAGE 3 ---
+// --- STAGE 3: Health ---
 export const updateHealth = catchAsync(async (req, res, next) => {
+  const { isComplete, ...data } = req.body;
+
   const result = await ProfileService.updateHealthHistory(
     req.user.id,
-    req.body
+    data,
+    isComplete === "true" || isComplete === true
   );
   res.status(200).json({ status: "success", data: result });
 });
 
-// --- STAGE 4 ---
+// --- STAGE 4: Genetic ---
 export const updateGenetic = catchAsync(async (req, res, next) => {
   const fileUrl = req.file ? getFileUrl(req, req.file) : null;
+  const { isComplete, conditions } = req.body;
 
   const result = await ProfileService.updateGeneticProfile(
     req.user.id,
-    req.body.conditions,
-    fileUrl
+    conditions,
+    fileUrl,
+    isComplete === "true" || isComplete === true
   );
   res.status(200).json({ status: "success", data: result });
 });
 
-// --- STAGE 5 ---
+// --- STAGE 5: Compensation ---
 export const updateCompensation = catchAsync(async (req, res, next) => {
-  if (req.body.allowBidding === "true" && !req.body.minAccepted) {
+  const { isComplete, ...data } = req.body;
+
+  if (data.allowBidding === "true" && !data.minAccepted) {
     return next(
       new AppError(
         "Minimum accepted price is required when bidding is allowed",
@@ -99,11 +120,15 @@ export const updateCompensation = catchAsync(async (req, res, next) => {
       )
     );
   }
-  const result = await ProfileService.upsertCompensation(req.user.id, req.body);
+  const result = await ProfileService.upsertCompensation(
+    req.user.id,
+    data,
+    isComplete === "true" || isComplete === true
+  );
   res.status(200).json({ status: "success", data: result });
 });
 
-// --- STAGE 6 ---
+// --- STAGE 6: Legal ---
 export const completeProfile = catchAsync(async (req, res, next) => {
   const { consentAgreed, anonymityPreference } = req.body;
 
@@ -111,11 +136,13 @@ export const completeProfile = catchAsync(async (req, res, next) => {
     return next(new AppError("You must agree to the consent form", 400));
   }
 
+  // This service method explicitly sets onboardingStep to 6
   const result = await ProfileService.completeLegalAgreements(
     req.user.id,
     consentAgreed,
     anonymityPreference
   );
+
   res.status(200).json({
     status: "success",
     message: "Profile completion submitted for review",
@@ -169,7 +196,6 @@ export const approveProfile = catchAsync(async (req, res, next) => {
 // --- STAGE 1: BASICS ---
 export const getBasicInfo = catchAsync(async (req, res) => {
   const data = await ProfileService.getBasicInfo(req.user.id);
-  // If data exists, return it. If not, return null (Frontend handles empty form)
   res.status(200).json({ status: "success", data });
 });
 
@@ -224,65 +250,20 @@ export const getCurrentProfile = catchAsync(async (req, res, next) => {
     return next(new AppError("User not found", 404));
   }
 
-  // 2. DYNAMIC STAGE CALCULATION
-  let lastCompletedStage = 0;
-
-  // --- STAGE 1 CHECK (Basics + Identity + Photos) ---
-  const hasBasics = !!user.profile?.legalName;
-  const hasIdentity =
-    user.identityDocuments && user.identityDocuments.length > 0;
-  const hasPhotos = !!(
-    user.profile?.babyPhotoUrl && user.profile?.currentPhotoUrl
-  );
-
-  // Only if ALL three parts of Stage 1 are done do we count Stage 1 as complete
-  if (hasBasics && hasIdentity && hasPhotos) {
-    lastCompletedStage = 1;
-  }
-
-  // --- STAGE 2 CHECK (Background) ---
-  // If Stage 1 is done AND they have a Bio (last field of Stage 2)
-  if (lastCompletedStage >= 1 && user.profile?.bio) {
-    lastCompletedStage = 2;
-  }
-
-  // --- STAGE 3 CHECK (Health) ---
-  // If Stage 2 is done AND Health record exists
-  if (lastCompletedStage >= 2 && user.health) {
-    lastCompletedStage = 3;
-  }
-
-  // --- STAGE 4 CHECK (Genetic) ---
-  // If Stage 3 is done AND Genetic record exists
-  if (lastCompletedStage >= 3 && user.genetic) {
-    lastCompletedStage = 4;
-  }
-
-  // --- STAGE 5 CHECK (Compensation) ---
-  // If Stage 4 is done AND 'isInterested' is set (true or false)
-  if (
-    lastCompletedStage >= 4 &&
-    user.compensation?.isInterested !== null &&
-    user.compensation?.isInterested !== undefined
-  ) {
-    lastCompletedStage = 5;
-  }
-
-  // --- STAGE 6 CHECK (Legal) ---
-  // If Stage 5 is done AND Consent is agreed
-  if (lastCompletedStage >= 5 && user.legal?.consentAgreed) {
-    lastCompletedStage = 6;
-  }
+  // 2. EXPLICIT STATE FROM DB
+  // No longer guessing based on fields. The 'onboardingStep' column is the source of truth.
+  const currentStep = user.onboardingStep || 0;
 
   // 3. SEND RESPONSE
   res.status(200).json({
     status: "success",
     data: {
       user,
-      // If Stage 1 is incomplete (e.g., only Basics done), lastCompletedStage is 0.
-      // So suggestedStage becomes 1. Frontend stays on Stage 1.
-      suggestedStage: lastCompletedStage + 1,
-      isComplete: lastCompletedStage === 6,
+      lastCompletedStep: currentStep,
+      // If they finished step 2, we suggest step 3.
+      suggestedStage: currentStep + 1,
+      // Fully complete if they hit the final step (6)
+      isComplete: currentStep >= 6,
     },
   });
 });

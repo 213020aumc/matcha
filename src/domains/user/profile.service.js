@@ -1,60 +1,118 @@
 import prisma from "../../config/prisma.js";
 import { EmailService } from "../../services/emailService.js";
 
+/**
+ * HELPER: Safely advances the onboarding step.
+ * Only updates if the new step is greater than the current step.
+ */
+const advanceStep = async (tx, userId, stepNumber) => {
+  const user = await tx.user.findUnique({
+    where: { id: userId },
+    select: { onboardingStep: true },
+  });
+
+  if (user && user.onboardingStep < stepNumber) {
+    await tx.user.update({
+      where: { id: userId },
+      data: { onboardingStep: stepNumber },
+    });
+  }
+};
+
 // --- Stage 1: Basics & Identity ---
-export const upsertBasicInfo = async (userId, data) => {
-  return await prisma.userProfile.upsert({
-    where: { userId },
-    update: {
-      legalName: data.legalName,
-      dob: new Date(data.dob),
-      phoneNumber: data.phoneNumber,
-      address: data.address,
-    },
-    create: {
-      userId,
-      legalName: data.legalName,
-      dob: new Date(data.dob),
-      phoneNumber: data.phoneNumber,
-      address: data.address,
-    },
+// (Usually Step 1 is marked complete only after Basics + Photos + ID are done.
+//  The controller should pass isStepComplete=true only on the final action of Stage 1)
+export const upsertBasicInfo = async (userId, data, isStepComplete = false) => {
+  return await prisma.$transaction(async (tx) => {
+    const profile = await tx.userProfile.upsert({
+      where: { userId },
+      update: {
+        legalName: data.legalName,
+        dob: new Date(data.dob),
+        phoneNumber: data.phoneNumber,
+        address: data.address,
+      },
+      create: {
+        userId,
+        legalName: data.legalName,
+        dob: new Date(data.dob),
+        phoneNumber: data.phoneNumber,
+        address: data.address,
+      },
+    });
+
+    if (isStepComplete) {
+      await advanceStep(tx, userId, 1);
+    }
+
+    return profile;
   });
 };
 
 export const saveIdentityDoc = async (userId, type, fileUrl) => {
+  // Identity docs are usually just one part of Stage 1.
+  // We typically don't mark the whole step complete here unless it's the very last action.
   return await prisma.identityDocument.create({
     data: { userId, type, fileUrl },
   });
 };
 
-export const updateProfilePhotos = async (userId, photoUrls) => {
-  return await prisma.userProfile.upsert({
-    where: { userId },
-    update: photoUrls,
-    create: { userId, ...photoUrls },
+export const updateProfilePhotos = async (
+  userId,
+  photoUrls,
+  isStepComplete = false
+) => {
+  return await prisma.$transaction(async (tx) => {
+    const profile = await tx.userProfile.upsert({
+      where: { userId },
+      update: photoUrls,
+      create: { userId, ...photoUrls },
+    });
+
+    if (isStepComplete) {
+      await advanceStep(tx, userId, 1);
+    }
+
+    return profile;
   });
 };
 
 // --- Stage 2: Background ---
-export const updateBackgroundInfo = async (userId, data) => {
-  return await prisma.userProfile.update({
-    where: { userId },
-    data: {
-      education: data.education,
-      occupation: data.occupation,
-      nationality: data.nationality,
-      diet: data.diet,
-      height: data.height ? parseInt(data.height) : null,
-      weight: data.weight ? parseInt(data.weight) : null,
-      hairColor: data.hairColor,
-      eyeColor: data.eyeColor,
-      bio: data.bio,
-    },
+export const updateBackgroundInfo = async (
+  userId,
+  data,
+  isStepComplete = false
+) => {
+  return await prisma.$transaction(async (tx) => {
+    const profile = await tx.userProfile.update({
+      where: { userId },
+      data: {
+        education: data.education,
+        occupation: data.occupation,
+        nationality: data.nationality,
+        diet: data.diet,
+        height: data.height ? parseInt(data.height) : null,
+        weight: data.weight ? parseInt(data.weight) : null,
+        hairColor: data.hairColor,
+        eyeColor: data.eyeColor,
+        bio: data.bio,
+      },
+    });
+
+    if (isStepComplete) {
+      await advanceStep(tx, userId, 2);
+    }
+
+    return profile;
   });
 };
 
 // --- Stage 3: Health ---
-export const updateHealthHistory = async (userId, data) => {
+export const updateHealthHistory = async (
+  userId,
+  data,
+  isStepComplete = false
+) => {
   // Destructure incoming JSON keys
   const {
     diabetes,
@@ -62,9 +120,9 @@ export const updateHealthHistory = async (userId, data) => {
     autoimmune,
     mentalHealth,
     hivStatus,
-    cancer, // Incoming key
-    neuroDisorder, // Incoming key
-    respiratory, // Incoming key
+    cancer,
+    neuroDisorder,
+    respiratory,
     otherConditions,
     majorSurgeries,
     allergies,
@@ -78,7 +136,7 @@ export const updateHealthHistory = async (userId, data) => {
     pregnancyHistory,
   } = data;
 
-  // Mapping to the Schema keys (e.g., cancer -> hasCancer)
+  // Mapping to the Schema keys
   const sanitizedData = {
     hasDiabetes: diabetes === "true" || diabetes === true,
     hasHeartCondition: heart === "true" || heart === true,
@@ -107,10 +165,18 @@ export const updateHealthHistory = async (userId, data) => {
     pregnancyHistory: pregnancyHistory !== undefined ? pregnancyHistory : null,
   };
 
-  return await prisma.userHealth.upsert({
-    where: { userId },
-    update: sanitizedData,
-    create: { userId, ...sanitizedData },
+  return await prisma.$transaction(async (tx) => {
+    const health = await tx.userHealth.upsert({
+      where: { userId },
+      update: sanitizedData,
+      create: { userId, ...sanitizedData },
+    });
+
+    if (isStepComplete) {
+      await advanceStep(tx, userId, 3);
+    }
+
+    return health;
   });
 };
 
@@ -118,7 +184,8 @@ export const updateHealthHistory = async (userId, data) => {
 export const updateGeneticProfile = async (
   userId,
   conditions,
-  reportFileUrl
+  reportFileUrl,
+  isStepComplete = false
 ) => {
   let carrierConditions = [];
 
@@ -135,15 +202,27 @@ export const updateGeneticProfile = async (
   const data = { carrierConditions };
   if (reportFileUrl) data.reportFileUrl = reportFileUrl;
 
-  return await prisma.userGenetic.upsert({
-    where: { userId },
-    update: data,
-    create: { userId, ...data },
+  return await prisma.$transaction(async (tx) => {
+    const genetic = await tx.userGenetic.upsert({
+      where: { userId },
+      update: data,
+      create: { userId, ...data },
+    });
+
+    if (isStepComplete) {
+      await advanceStep(tx, userId, 4);
+    }
+
+    return genetic;
   });
 };
 
 // --- Stage 5: Compensation ---
-export const upsertCompensation = async (userId, data) => {
+export const upsertCompensation = async (
+  userId,
+  data,
+  isStepComplete = false
+) => {
   const payload = {
     isInterested: data.isInterested === "true" || data.isInterested === true,
     allowBidding: data.allowBidding === "true" || data.allowBidding === true,
@@ -152,10 +231,18 @@ export const upsertCompensation = async (userId, data) => {
     buyNowPrice: data.buyNow ? parseFloat(data.buyNow) : null,
   };
 
-  return await prisma.userCompensation.upsert({
-    where: { userId },
-    update: payload,
-    create: { userId, ...payload },
+  return await prisma.$transaction(async (tx) => {
+    const comp = await tx.userCompensation.upsert({
+      where: { userId },
+      update: payload,
+      create: { userId, ...payload },
+    });
+
+    if (isStepComplete) {
+      await advanceStep(tx, userId, 5);
+    }
+
+    return comp;
   });
 };
 
@@ -174,14 +261,20 @@ export const completeLegalAgreements = async (
     });
 
     // 2. Update User Status to PENDING_REVIEW
+    // 3. Mark Stage 6 as complete (or set to 6 to indicate full completion)
     await tx.user.update({
       where: { id: userId },
-      data: { profileStatus: "PENDING_REVIEW" },
+      data: {
+        profileStatus: "PENDING_REVIEW",
+        onboardingStep: 6,
+      },
     });
 
     return legal;
   });
 };
+
+// --- Misc / Admin Utils ---
 
 export const updateOnboardingData = async (userId, data) => {
   const {
@@ -214,16 +307,16 @@ export const getPendingProfiles = async () => {
       email: true,
       role: true,
       createdAt: true,
-      profile: true, // Return full profile for review
+      profile: true,
       health: true,
       genetic: true,
       identityDocuments: true,
+      onboardingStep: true, // Useful to see for debugging
     },
     orderBy: { createdAt: "asc" },
   });
 };
 
-// ADMIN: Approve or Reject
 export const updateProfileStatus = async (userId, status, rejectionReason) => {
   // 1. Update the status in Database
   const user = await prisma.user.update({
@@ -231,7 +324,7 @@ export const updateProfileStatus = async (userId, status, rejectionReason) => {
     data: {
       profileStatus: status,
     },
-    include: { profile: true }, // Include profile to get the Name for the email
+    include: { profile: true },
   });
 
   // 2. Send Email Notification
@@ -241,17 +334,16 @@ export const updateProfileStatus = async (userId, status, rejectionReason) => {
     if (status === "ACTIVE") {
       await emailService.sendProfileActive();
     } else if (status === "REJECTED") {
-      // rejectionReason is mandatory for REJECTED status controller logic
       await emailService.sendProfileRejected(rejectionReason);
     }
   } catch (error) {
     console.error(`❌ Failed to send status email to user ${userId}:`, error);
-    // We do NOT throw error here because the DB update was successful.
-    // We just log the email failure.
   }
 
   return user;
 };
+
+// --- Getters ---
 
 export const getBasicInfo = async (userId) => {
   return await prisma.userProfile.findUnique({
@@ -311,7 +403,7 @@ export const getPhotos = async (userId) => {
 export const getIdentityStatus = async (userId) => {
   return await prisma.identityDocument.findMany({
     where: { userId },
-    select: { type: true, uploadedAt: true, fileUrl: true }, // Return status/URL, not just file
+    select: { type: true, uploadedAt: true, fileUrl: true },
   });
 };
 

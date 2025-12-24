@@ -1,0 +1,25 @@
+doctype html
+html
+    head
+        meta(name='viewport', content='width=device-width')
+        meta(http-equiv='Content-Type', content='text/html; charset=UTF-8')
+        title= subject
+        style.
+            body { font-family: sans-serif; background-color: #f6f6f6; padding: 20px; }
+            .container { background-color: #ffffff; padding: 30px; border-radius: 8px; margin: 0 auto; max-width: 600px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+            .otp-box { background-color: #f0f0f0; padding: 15px; text-align: center; border-radius: 5px; margin: 20px 0; }
+            .otp-code { font-size: 32px; font-weight: bold; color: #4CAF50; letter-spacing: 5px; margin: 0; }
+            .footer { margin-top: 30px; font-size: 12px; color: #999; text-align: center; border-top: 1px solid #eee; padding-top: 10px; }
+
+    body
+        div.container
+            h2 Hello #{firstName},
+            p You requested a verification code for <strong>#{businessName}</strong>.
+
+            div.otp-box
+                p.otp-code #{otp}
+
+            p This code is valid for 10 minutes.
+
+            div.footer
+                p #{footerText}

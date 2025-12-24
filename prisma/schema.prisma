@@ -1,0 +1,389 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==============================
+// 1. ENUMS
+// ==============================
+
+enum UserRole {
+  ADMIN
+  DONOR
+  RECIPIENT
+  ASPIRING_PARENT
+}
+
+enum DietType {
+  OMNIVORE
+  VEGETARIAN
+  VEGAN
+  KOSHER
+  HALAL
+  GLUTEN_FREE
+}
+
+enum CMVStatus {
+  POSITIVE
+  NEGATIVE
+  NOT_SURE
+}
+
+enum AnonymityType {
+  IDENTITY_DISCLOSURE
+  ANONYMOUS
+}
+
+enum DocType {
+  DRIVER_LICENSE
+  PASSPORT
+}
+
+enum GenderIdentity {
+  WOMAN
+  MAN
+  OTHER
+}
+
+enum ServiceType {
+  DONOR_SERVICES
+  SURROGACY_SERVICES
+}
+
+enum PairingType {
+  DONOR_BANK
+  PRIVATE_DONATION_ONLY
+  PRIVATE_CO_PARENTING
+  PRIVATE_RELATIONSHIP
+  PRIVATE_MARRIAGE
+  PRIVATE_SURROGATE
+}
+
+enum GameteType {
+  SPERM
+  EGG
+  EMBRYO
+}
+
+enum PlanStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum ProfileStatus {
+  DRAFT // Profile not yet submitted
+  PENDING_REVIEW // Submitted, waiting for Admin
+  ACTIVE // Approved and Visible
+  REJECTED // Rejected by Admin
+}
+
+model Settings {
+  id    Int    @id @default(autoincrement())
+  key   String @unique // e.g., "SMTP_HOST", "BUSINESS_NAME"
+  value String
+}
+
+model Permission {
+  id          String  @id @default(uuid()) @db.Uuid
+  slug        String  @unique // e.g., "settings.update", "user.delete"
+  description String?
+  roles       Role[]  @relation("RolePermissions") // Many-to-Many
+}
+
+model Role {
+  id          String       @id @default(uuid()) @db.Uuid
+  name        String       @unique // "Super Admin", "Moderator", "Standard User"
+  description String?
+  isSystem    Boolean      @default(false) // If true, cannot be deleted (e.g. Super Admin)
+  permissions Permission[] @relation("RolePermissions")
+  users       User[]
+}
+
+// ==============================
+// 2. AUTH & CORE USER
+// ==============================
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  role         UserRole?
+  accessRoleId String?   @db.Uuid
+  accessRole   Role?     @relation(fields: [accessRoleId], references: [id])
+  createdAt    DateTime  @default(now())
+
+  // --- ONBOARDING FIELDS ---
+  termsAccepted Boolean         @default(false)
+  gender        GenderIdentity?
+  serviceType   ServiceType? // "What are you looking for?" (Multi-select)
+  interestedIn  GameteType? // "Egg Donor, Sperm Donor" (Multi-select)
+  pairingTypes  PairingType[]
+
+  profileStatus ProfileStatus @default(DRAFT)
+
+  // Profile Completion Relations (One-to-One)
+  profile      UserProfile?
+  health       UserHealth?
+  genetic      UserGenetic?
+  compensation UserCompensation?
+  legal        UserLegal?
+
+  // Relations (One-to-Many)
+  identityDocuments IdentityDocument[]
+  userOtps          UserOtp[]
+  sessions          UserSession[]
+  subscriptions     UserSubscription[]
+  payments          Payment[]
+
+  // Discovery & Matching
+  queueOwner   DiscoveryQueue[] @relation("QueueOwner")
+  queueTarget  DiscoveryQueue[] @relation("QueueTarget")
+  matchesAsA   Match[]          @relation("MatchUserA")
+  matchesAsB   Match[]          @relation("MatchUserB")
+  blockedUsers BlockedUser[]    @relation("Blocker")
+  blockedBy    BlockedUser[]    @relation("Blocked")
+}
+
+model UserOtp {
+  id         Int       @id @default(autoincrement())
+  userId     String    @map("user_id") @db.Uuid
+  otpHash    String    @map("otp_hash")
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  user       User      @relation(fields: [userId], references: [id])
+
+  @@map("user_otp")
+}
+
+model UserSession {
+  id           Int      @id @default(autoincrement())
+  userId       String   @map("user_id") @db.Uuid
+  lastActiveAt DateTime @default(now()) @map("last_active_at")
+  expiresAt    DateTime @map("expires_at")
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@map("user_sessions")
+}
+
+// ==============================
+// 3. PROFILE COMPLETION STAGES
+// ==============================
+
+// Stages 1 & 2: Basics, Photos, Background
+model UserProfile {
+  id     String @id @default(uuid())
+  userId String @unique @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  // Basics
+  legalName   String?
+  dob         DateTime?
+  phoneNumber String?
+  address     String?
+
+  // Photos (URLs)
+  babyPhotoUrl    String?
+  currentPhotoUrl String?
+
+  // Background
+  education   String?
+  occupation  String?
+  nationality String?
+  diet        DietType?
+
+  // Physical Attributes
+  height      Int? // cm
+  weight      Int? // kg
+  bodyBuild   String?
+  hairColor   String?
+  eyeColor    String?
+  race        String?
+  orientation String?
+
+  bio String? @db.Text
+}
+
+// Stage 3: Health & Medical
+model UserHealth {
+  id     String @id @default(uuid())
+  userId String @unique @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  isPrivate Boolean @default(true)
+
+  // Chronic Conditions
+  hasDiabetes       Boolean @default(false)
+  hasHeartCondition Boolean @default(false)
+  hasAutoimmune     Boolean @default(false)
+  hasCancer         Boolean @default(false)
+  hasNeuroDisorder  Boolean @default(false)
+  hasRespiratory    Boolean @default(false)
+  otherConditions   String?
+
+  // Detailed History
+  majorSurgeries   String?
+  allergies        Boolean    @default(false)
+  allergiesDetails String?
+  cmvStatus        CMVStatus?
+  medications      String?
+
+  // Reproductive / Mental
+  mentalHealthHistory String?
+  biologicalChildren  Boolean @default(false)
+  reproductiveIssues  Boolean @default(false)
+
+  // Female Specific
+  menstrualRegularity Boolean?
+  pregnancyHistory    Boolean?
+  reproductiveConds   String?
+
+  // Lifestyle / Travel
+  hivHepStatus       Boolean @default(false)
+  needleUsage        Boolean @default(false)
+  transfusionHistory Boolean @default(false)
+  malariaRisk        Boolean @default(false)
+  zikaRisk           Boolean @default(false)
+}
+
+// Stage 4: Genetic
+model UserGenetic {
+  id     String @id @default(uuid())
+  userId String @unique @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  carrierConditions String[] // Stores codes like ["MKS1", "CFTR"]
+  reportFileUrl     String?
+}
+
+// Stage 5: Compensation
+model UserCompensation {
+  id     String @id @default(uuid())
+  userId String @unique @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  isInterested     Boolean  @default(false)
+  allowBidding     Boolean  @default(false)
+  askingPrice      Decimal? @db.Decimal(10, 2)
+  minAcceptedPrice Decimal? @db.Decimal(10, 2)
+  buyNowPrice      Decimal? @db.Decimal(10, 2)
+}
+
+// Stage 6: Legal
+model UserLegal {
+  id     String @id @default(uuid())
+  userId String @unique @db.Uuid
+  user   User   @relation(fields: [userId], references: [id])
+
+  consentAgreed       Boolean       @default(false)
+  anonymityPreference AnonymityType
+  agreedAt            DateTime      @default(now())
+}
+
+// Identity Documents (Passport/License)
+model IdentityDocument {
+  id         String   @id @default(uuid())
+  userId     String   @db.Uuid
+  user       User     @relation(fields: [userId], references: [id])
+  type       DocType
+  fileUrl    String
+  uploadedAt DateTime @default(now())
+}
+
+// ==============================
+// 4. BILLING & MATCHING (Keep existing logic)
+// ==============================
+
+model Plan {
+  id           Int     @id @default(autoincrement())
+  code         String  @unique
+  name         String
+  description  String? @db.Text
+  price        Decimal @db.Decimal(10, 2)
+  currency     String  @default("USD")
+  billingCycle String  @map("billing_cycle")
+  features     Json?
+  isActive     Boolean @default(true) @map("is_active")
+
+  subscriptions UserSubscription[]
+  payments      Payment[]
+
+  @@map("plans")
+}
+
+model UserSubscription {
+  id        Int        @id @default(autoincrement())
+  userId    String     @map("user_id") @db.Uuid
+  planId    Int        @map("plan_id")
+  status    PlanStatus
+  startedAt DateTime   @default(now()) @map("started_at")
+  expiresAt DateTime   @map("expires_at")
+  autoRenew Boolean    @default(true) @map("auto_renew")
+
+  user User @relation(fields: [userId], references: [id])
+  plan Plan @relation(fields: [planId], references: [id])
+
+  @@map("user_subscriptions")
+}
+
+model Payment {
+  id        Int      @id @default(autoincrement())
+  userId    String   @map("user_id") @db.Uuid
+  planId    Int      @map("plan_id")
+  provider  String
+  amount    Decimal  @db.Decimal(10, 2)
+  currency  String
+  status    String
+  reference String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+  plan Plan @relation(fields: [planId], references: [id])
+
+  @@map("payments")
+}
+
+model DiscoveryQueue {
+  id           Int    @id @default(autoincrement())
+  userId       String @map("user_id") @db.Uuid
+  targetUserId String @map("target_user_id") @db.Uuid
+  status       String // PENDING, SEEN, LIKED, PASSED
+
+  user   User @relation("QueueOwner", fields: [userId], references: [id])
+  target User @relation("QueueTarget", fields: [targetUserId], references: [id])
+
+  @@map("discovery_queue")
+}
+
+model Match {
+  id        Int      @id @default(autoincrement())
+  userAId   String   @map("user_a") @db.Uuid
+  userBId   String   @map("user_b") @db.Uuid
+  matchedAt DateTime @default(now()) @map("matched_at")
+
+  userA User @relation("MatchUserA", fields: [userAId], references: [id])
+  userB User @relation("MatchUserB", fields: [userBId], references: [id])
+
+  @@map("matches")
+}
+
+model BlockedUser {
+  id            Int      @id @default(autoincrement())
+  userId        String   @map("user_id") @db.Uuid
+  blockedUserId String   @map("blocked_user_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  blocker User @relation("Blocker", fields: [userId], references: [id])
+  blocked User @relation("Blocked", fields: [blockedUserId], references: [id])
+
+  @@map("blocked_users")
+}

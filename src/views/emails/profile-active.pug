@@ -1,0 +1,29 @@
+doctype html
+html
+    head
+        meta(name='viewport', content='width=device-width')
+        meta(http-equiv='Content-Type', content='text/html; charset=UTF-8')
+        title Profile Approved
+        style.
+            body { font-family: sans-serif; background-color: #f6f6f6; padding: 20px; }
+            .container { background-color: #ffffff; padding: 30px; border-radius: 8px; margin: 0 auto; max-width: 600px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+            .header { text-align: center; border-bottom: 1px solid #eee; padding-bottom: 20px; margin-bottom: 20px; }
+            .success-icon { font-size: 48px; margin-bottom: 10px; }
+            .btn { display: inline-block; background-color: #4CAF50; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; margin-top: 20px; font-weight: bold; }
+            .footer { margin-top: 30px; font-size: 12px; color: #999; text-align: center; border-top: 1px solid #eee; padding-top: 10px; }
+
+    body
+        div.container
+            div.header
+                div.success-icon 🎉
+                h2 Congratulations, #{firstName}!
+
+            p Great news! Your profile on <strong>#{businessName}</strong> has been reviewed and is now <strong>ACTIVE</strong>.
+
+            p You are now visible to other users and can fully interact with the platform.
+
+            div(style="text-align: center;")
+                a.btn(href="https://helix-frontend.com/login") Login to Dashboard
+
+            div.footer
+                p #{footerText}

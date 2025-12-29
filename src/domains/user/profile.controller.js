@@ -197,10 +197,23 @@ export const updateHealth = catchAsync(async (req, res, next) => {
 
 // --- STAGE 4: Genetic ---
 export const updateGenetic = catchAsync(async (req, res, next) => {
-  
+
+  // console.log("Received genetic update request");
+  // console.log("Body:", req.body);
+  // console.log("File:", req.file);
 
   const fileUrl = req.file ? getFileUrl(req, req.file) : null;
   const { isComplete, conditions } = req.body;
+
+  // Parse conditions safely
+  let parsedConditions = [];
+  if (conditions) {
+    try {
+      parsedConditions = typeof conditions === 'string' ? JSON.parse(conditions) : conditions;
+    } catch (e) {
+      console.error("Failed to parse conditions:", e);
+      parsedConditions = [];
+    }
 
   const result = await ProfileService.updateGeneticProfile(
     req.user.id,

@@ -2,9 +2,48 @@ import * as ProfileService from "./profile.service.js";
 import catchAsync from "../../utils/catchAsync.js";
 import { AppError } from "../../utils/AppError.js";
 import { getFileUrl } from "../../utils/upload.js";
+import prisma from "../../config/prisma.js";
 
 export const submitOnboarding = catchAsync(async (req, res, next) => {
-  // Use data from Body, use ID from JWT (req.user)
+  const { role, serviceType, interestedIn } = req.body;
+
+  // --- 1. SURROGACY ---
+  if (serviceType === "SURROGACY_SERVICES") {
+    // SCENARIO: User says "I want to BE a Surrogate" (Role: DONOR)
+    if (role === "DONOR") {
+      req.body.interestedIn = null;
+    }
+
+    // SCENARIO: User says "I am LOOKING FOR a Surrogate" (Role: ASPIRING_PARENT)
+    else if (role === "ASPIRING_PARENT") {
+      // Rule: Parents don't need to specify their own gametes here, they are the recipients.
+      // Action: Ensure 'interestedIn' is null.
+      req.body.interestedIn = null;
+    }
+
+    // SCENARIO: Invalid Roles
+    else {
+      // Other roles like 'RECIPIENT' that shouldn't be here
+      return next(new AppError("Invalid role for Surrogacy Services.", 400));
+    }
+  }
+
+  // --- 2. DONOR FLOW VALIDATION ---
+  if (serviceType === "DONOR_SERVICES") {
+    // SCENARIO: User says "I want to DONATE" (Egg/Sperm/Embryo)
+    if (role === "DONOR") {
+      // Rule: Standard Donors MUST specify what they are donating.
+      if (!interestedIn) {
+        return next(
+          new AppError(
+            "Donors must specify what they are donating (Egg/Sperm/Embryo)",
+            400
+          )
+        );
+      }
+    }
+  }
+
   const result = await ProfileService.updateOnboardingData(
     req.user.id,
     req.body
@@ -14,7 +53,7 @@ export const submitOnboarding = catchAsync(async (req, res, next) => {
     status: "success",
     data: {
       user: result,
-      nextStep: "PROFILE_COMPLETION", // Frontend signal
+      nextStep: "PROFILE_COMPLETION", // Frontend signal to move to next screen
     },
   });
 });
@@ -73,6 +112,37 @@ export const uploadPhotos = catchAsync(async (req, res, next) => {
 // --- STAGE 2: Background ---
 export const updateBackground = catchAsync(async (req, res, next) => {
   const { isComplete, ...data } = req.body;
+  
+  // Only validate required fields when marking as complete AND user is surrogacy candidate
+  if (
+    (isComplete === "true" || isComplete === true) &&
+    req.user.serviceType === "SURROGACY_SERVICES"
+  ) {
+    // Fetch the user's profile to check for existing dob
+    const existingProfile = await prisma.userProfile.findUnique({
+      where: { userId: req.user.id },
+      select: { dob: true, height: true, weight: true }
+    });
+
+    const requiredFields = ["height", "weight"];
+    const missing = requiredFields.filter(
+      (field) => !data[field] && !existingProfile?.[field]
+    );
+
+    // Check dob separately since it's from Stage 1
+    if (!existingProfile?.dob) {
+      missing.push("dob");
+    }
+
+    if (missing.length > 0) {
+      return next(
+        new AppError(
+          `Surrogacy candidates must provide: ${missing.join(", ")}`,
+          400
+        )
+      );
+    }
+  }
 
   const result = await ProfileService.updateBackgroundInfo(
     req.user.id,
@@ -86,6 +156,37 @@ export const updateBackground = catchAsync(async (req, res, next) => {
 export const updateHealth = catchAsync(async (req, res, next) => {
   const { isComplete, ...data } = req.body;
 
+  if (
+    (isComplete === "true" || isComplete === true) &&
+    req.user.serviceType === "SURROGACY_SERVICES"
+  ) {
+    // 1. Pregnancy History is MANDATORY for surrogates
+    // (We check undefined because false is a valid boolean answer, though usually surrogates must have history)
+    if (
+      data.pregnancyHistory === undefined &&
+      data.pregnancyHistory !== "false" &&
+      data.pregnancyHistory !== "true"
+    ) {
+      return next(
+        new AppError(
+          "Pregnancy history is required for surrogacy candidates.",
+          400
+        )
+      );
+    }
+
+    // 2. Menstrual Regularity is MANDATORY
+    if (
+      data.menstrualRegularity === undefined &&
+      data.menstrualRegularity !== "false" &&
+      data.menstrualRegularity !== "true"
+    ) {
+      return next(
+        new AppError("Menstrual regularity information is required.", 400)
+      );
+    }
+  }
+
   const result = await ProfileService.updateHealthHistory(
     req.user.id,
     data,
@@ -96,6 +197,8 @@ export const updateHealth = catchAsync(async (req, res, next) => {
 
 // --- STAGE 4: Genetic ---
 export const updateGenetic = catchAsync(async (req, res, next) => {
+  
+
   const fileUrl = req.file ? getFileUrl(req, req.file) : null;
   const { isComplete, conditions } = req.body;
 

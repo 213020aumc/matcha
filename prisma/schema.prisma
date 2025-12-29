@@ -245,9 +245,9 @@ model UserHealth {
   reproductiveIssues  Boolean @default(false)
 
   // Female Specific
-  menstrualRegularity Boolean?
-  pregnancyHistory    Boolean?
-  reproductiveConds   String?
+  menstrualRegularity Boolean? @default(false)
+  pregnancyHistory    Boolean? @default(false)
+  reproductiveConds   Boolean  @default(false)
 
   // Lifestyle / Travel
   hivHepStatus       Boolean @default(false)

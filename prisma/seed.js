@@ -4,8 +4,7 @@ import { faker } from "@faker-js/faker";
 // Helper for random selection
 const random = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-// FIX: Options must match Enum definitions exactly (Case Sensitive)
-// Assuming your Schema Enums are uppercase (e.g. OMNIVORE, VEGETARIAN)
+// Options matching Schema Enums (Case Sensitive)
 const DIET_OPTIONS = [
   "OMNIVORE",
   "VEGETARIAN",
@@ -14,8 +13,6 @@ const DIET_OPTIONS = [
   "HALAL",
   "GLUTEN_FREE",
 ];
-
-// Text fields don't need strict matching, but good to keep consistent
 const BUILD_OPTIONS = ["Slim", "Athletic", "Average", "Curvy", "Large"];
 const HAIR_OPTIONS = ["Auburn", "Black", "Blonde", "Brown", "Red"];
 const EYE_OPTIONS = ["Blue", "Black", "Green", "Brown", "Hazel"];
@@ -33,7 +30,121 @@ async function main() {
   console.log("🌱 Starting Seeding...");
 
   // =======================================================
-  // 1. PLANS
+  // 1. PERMISSIONS
+  // =======================================================
+  const permissions = [
+    { slug: "settings.view", description: "View system settings" },
+    { slug: "settings.manage", description: "Update system settings" },
+    { slug: "users.view", description: "View user list" },
+    { slug: "users.manage", description: "Ban, delete, or edit users" },
+    {
+      slug: "profiles.view_pending",
+      description: "View profiles waiting for review",
+    },
+    { slug: "profiles.approve", description: "Approve or Reject profiles" },
+    {
+      slug: "profiles.view_sensitive",
+      description: "View private health/genetic data",
+    },
+    { slug: "roles.manage", description: "Manage roles" },
+    { slug: "dashboard.view", description: "View admin analytics" },
+  ];
+
+  console.log("Creating permissions...");
+  for (const p of permissions) {
+    await prisma.permission.upsert({
+      where: { slug: p.slug },
+      update: { description: p.description },
+      create: p,
+    });
+  }
+  console.log("✅ Permissions seeded");
+
+  // =======================================================
+  // 2. ROLES (using prisma.role - matching schema model name)
+  // =======================================================
+  const allPermissions = await prisma.permission.findMany();
+
+  // A. SUPER ADMIN (Has EVERYTHING)
+  const superAdminRole = await prisma.role.upsert({
+    where: { name: "Super Admin" },
+    update: {
+      description: "Full system access",
+      permissions: {
+        set: allPermissions.map((p) => ({ id: p.id })),
+      },
+    },
+    create: {
+      name: "Super Admin",
+      description: "Full system access",
+      isSystem: true,
+      permissions: {
+        connect: allPermissions.map((p) => ({ id: p.id })),
+      },
+    },
+  });
+  console.log("✅ Super Admin role created with ID:", superAdminRole.id);
+
+  // B. MODERATOR
+  const modPermissions = allPermissions.filter(
+    (p) =>
+      p.slug.startsWith("profiles.") ||
+      p.slug === "users.view" ||
+      p.slug === "dashboard.view"
+  );
+
+  await prisma.role.upsert({
+    where: { name: "Moderator" },
+    update: {
+      permissions: { set: modPermissions.map((p) => ({ id: p.id })) },
+    },
+    create: {
+      name: "Moderator",
+      description: "Can review profiles and view users",
+      permissions: { connect: modPermissions.map((p) => ({ id: p.id })) },
+    },
+  });
+  console.log("✅ Moderator role seeded");
+
+  // C. STANDARD USER (No Admin permissions)
+  await prisma.role.upsert({
+    where: { name: "User" },
+    update: {},
+    create: {
+      name: "User",
+      description: "Standard App User",
+      isSystem: true,
+    },
+  });
+  console.log("✅ User role seeded");
+
+  // =======================================================
+  // 3. SUPER ADMIN USER
+  // =======================================================
+  const adminEmail = process.env.ADMIN_EMAIL || "admin@helix.com";
+
+  const superAdmin = await prisma.user.upsert({
+    where: { email: adminEmail },
+    update: {
+      accessRoleId: superAdminRole.id,
+      profileStatus: "ACTIVE",
+      termsAccepted: true,
+      onboardingStep: 6,
+    },
+    create: {
+      email: adminEmail,
+      accessRoleId: superAdminRole.id,
+      profileStatus: "ACTIVE",
+      termsAccepted: true,
+      onboardingStep: 6,
+    },
+  });
+  console.log(
+    `✅ Super Admin user created: ${superAdmin.email} (accessRoleId: ${superAdmin.accessRoleId})`
+  );
+
+  // =======================================================
+  // 4. PLANS
   // =======================================================
   const plans = [
     {
@@ -60,58 +171,71 @@ async function main() {
   console.log("✅ Plans seeded");
 
   // =======================================================
-  // 2. TEST USERS
+  // 5. SETTINGS
+  // =======================================================
+  const defaultSettings = [
+    { key: "BUSINESS_NAME", value: "Helix Fertility" },
+    { key: "ADMIN_EMAIL", value: adminEmail },
+    { key: "LOGO_PATH", value: "https://helix.com/logo.png" },
+    { key: "POLICY_LINK", value: "https://helix.com/policy" },
+    { key: "SOCIAL_FB", value: "https://facebook.com/helix" },
+    { key: "SOCIAL_X", value: "https://x.com/helix" },
+    { key: "MAIL_FOOTER_TEXT", value: "Best of Luck, Team Helix" },
+  ];
+
+  for (const s of defaultSettings) {
+    await prisma.settings.upsert({
+      where: { key: s.key },
+      update: {},
+      create: s,
+    });
+  }
+  console.log("✅ Settings seeded");
+
+  // =======================================================
+  // 6. TEST USERS
   // =======================================================
 
-  // --- STATE A: Fresh Login (Just Email) ---
-  // Use this to test: Login -> Redirect to Onboarding (Mission/Gender screens)
+  // --- Fresh User (No Onboarding) ---
   await prisma.user.upsert({
     where: { email: "new@helix.com" },
     update: {},
     create: {
       email: "new@helix.com",
       onboardingStep: 0,
-      // No Role, No Gender, No Terms yet
     },
   });
-  console.log("👉 Created Fresh User (No Onboarding): new@helix.com");
+  console.log("👉 Created Fresh User: new@helix.com");
 
-  // --- STATE B: Onboarding Done / Profile Pending ---
-  // Use this to test: Login -> Redirect to Profile Completion Stage 1
+  // --- Onboarded User (Pending Profile) ---
   await prisma.user.upsert({
     where: { email: "onboarded@helix.com" },
     update: { onboardingStep: 0 },
     create: {
       email: "onboarded@helix.com",
       onboardingStep: 0,
-      // Onboarding Completed
       termsAccepted: true,
       gender: "WOMAN",
       role: "DONOR",
       serviceType: "DONOR_SERVICES",
       interestedIn: null,
       pairingTypes: ["DONOR_BANK"],
-      // No Profile Data yet
     },
   });
-  console.log(
-    "👉 Created Onboarded User (Pending Profile): onboarded@helix.com"
-  );
+  console.log("👉 Created Onboarded User: onboarded@helix.com");
 
-  // --- STATE C: Partially Completed Profile (Stage 2) ---
+  // --- Partial User (Stage 2) ---
   await prisma.user.upsert({
     where: { email: "partial@helix.com" },
     update: { onboardingStep: 2 },
     create: {
       email: "partial@helix.com",
       onboardingStep: 2,
-      // Onboarding
       termsAccepted: true,
       gender: "MAN",
       role: "DONOR",
       serviceType: "DONOR_SERVICES",
       pairingTypes: ["PRIVATE_DONATION_ONLY"],
-      // Profile Stage 1 & 2 Done
       profile: {
         create: {
           legalName: "Jessica Partial",
@@ -135,22 +259,18 @@ async function main() {
   });
   console.log("👉 Created Partial User: partial@helix.com");
 
-  // --- STATE D: Fully Complete User ---
-  // Use this to test: Dashboard / Swiping
+  // --- Complete User ---
   await prisma.user.upsert({
     where: { email: "complete@helix.com" },
     update: { onboardingStep: 6 },
     create: {
       email: "complete@helix.com",
       onboardingStep: 6,
-      // Onboarding
       termsAccepted: true,
       gender: "MAN",
       role: "DONOR",
       serviceType: "DONOR_SERVICES",
       pairingTypes: ["PRIVATE_CO_PARENTING"],
-
-      // Full Profile
       profile: {
         create: {
           legalName: "Michael Complete",
@@ -206,10 +326,8 @@ async function main() {
   });
   console.log("👉 Created Complete User: complete@helix.com");
 
-  console.log("🌱 Seeding Completed.");
-
   // =======================================================
-  // 3. RANDOM POPULATION
+  // 7. RANDOM USERS (Optional - can be skipped if not needed)
   // =======================================================
   const NUM_USERS = 20;
   console.log(`...Generating ${NUM_USERS} random users...`);
@@ -218,15 +336,21 @@ async function main() {
     const sex = random(["male", "female"]);
     const firstName = faker.person.firstName(sex);
     const lastName = faker.person.lastName();
+    const email = faker.internet.email({ firstName, lastName }).toLowerCase();
+
+    // Skip if email already exists
+    const exists = await prisma.user.findUnique({ where: { email } });
+    if (exists) continue;
 
     await prisma.user.create({
       data: {
-        email: faker.internet.email({ firstName, lastName }),
+        email,
         role: "DONOR",
         serviceType: "DONOR_SERVICES",
         onboardingStep: 6,
-        
-        // STAGE 1 & 2: PROFILE
+        termsAccepted: true,
+        gender: sex === "male" ? "MAN" : "WOMAN",
+        pairingTypes: ["PRIVATE_DONATION_ONLY"],
         profile: {
           create: {
             legalName: `${firstName} ${lastName}`,
@@ -235,25 +359,20 @@ async function main() {
             address: faker.location.streetAddress(),
             nationality: faker.location.country(),
             bio: faker.person.bio(),
-
             height: faker.number.int({ min: 150, max: 200 }),
             weight: faker.number.int({ min: 50, max: 100 }),
             bodyBuild: random(BUILD_OPTIONS),
             hairColor: random(HAIR_OPTIONS),
             eyeColor: random(EYE_OPTIONS),
-            diet: random(DIET_OPTIONS), // Now strictly upper case
+            diet: random(DIET_OPTIONS),
             race: random(RACE_OPTIONS),
             orientation: random(ORIENTATION_OPTIONS),
-
             education: random(["High School", "Bachelor", "Master", "PhD"]),
             occupation: faker.person.jobTitle(),
-
             babyPhotoUrl: faker.image.url({ height: 400, width: 400 }),
             currentPhotoUrl: faker.image.url({ height: 400, width: 400 }),
           },
         },
-
-        // STAGE 3: HEALTH
         health: {
           create: {
             isPrivate: true,
@@ -262,165 +381,47 @@ async function main() {
             hasAutoimmune: false,
             allergies: faker.datatype.boolean(),
             allergiesDetails: "Seasonal Pollen",
-            cmvStatus: random(["POSITIVE", "NEGATIVE", "NOT_SURE"]), // Uppercase
+            cmvStatus: random(["POSITIVE", "NEGATIVE", "NOT_SURE"]),
             mentalHealthHistory: "None",
             hivHepStatus: false,
-
             menstrualRegularity: sex === "female" ? true : null,
             pregnancyHistory:
               sex === "female" ? faker.datatype.boolean() : null,
           },
         },
-
-        // STAGE 4: GENETIC
         genetic: {
           create: {
             carrierConditions: faker.datatype.boolean() ? ["CFTR", "SMA"] : [],
             reportFileUrl: "https://example.com/dummy-report.pdf",
           },
         },
-
-        // STAGE 5: COMPENSATION
         compensation: {
           create: {
             isInterested: true,
             allowBidding: faker.datatype.boolean(),
-            askingPrice: faker.commerce.price({ min: 1000, max: 5000 }),
-            minAcceptedPrice: faker.commerce.price({ min: 800, max: 1000 }),
-            buyNowPrice: faker.commerce.price({ min: 6000, max: 10000 }),
+            askingPrice: parseFloat(
+              faker.commerce.price({ min: 1000, max: 5000 })
+            ),
+            minAcceptedPrice: parseFloat(
+              faker.commerce.price({ min: 800, max: 1000 })
+            ),
+            buyNowPrice: parseFloat(
+              faker.commerce.price({ min: 6000, max: 10000 })
+            ),
           },
         },
-
-        // STAGE 6: LEGAL
         legal: {
           create: {
             consentAgreed: true,
-            anonymityPreference: random(["IDENTITY_DISCLOSURE", "ANONYMOUS"]), // Uppercase
+            anonymityPreference: random(["IDENTITY_DISCLOSURE", "ANONYMOUS"]),
           },
         },
       },
     });
   }
-
   console.log("✅ Random Users seeded");
-  console.log("🌱 Seeding Completed Successfully.");
 
-  // 4. SETTINGS
-  const defaultSettings = [
-    { key: "BUSINESS_NAME", value: "Helix Fertility" },
-    { key: "ADMIN_EMAIL", value: "admin@helix.com" },
-    { key: "LOGO_PATH", value: "https://helix.com/logo.png" },
-    { key: "POLICY_LINK", value: "https://helix.com/policy" },
-    { key: "SOCIAL_FB", value: "https://facebook.com/helix" },
-    { key: "SOCIAL_X", value: "https://x.com/helix" },
-    { key: "MAIL_FOOTER_TEXT", value: "Best of Luck, Team Helix" },
-    // SMTP (Mock values)
-    { key: "SMTP_HOST", value: "smtp.mailtrap.io" },
-    { key: "SMTP_PORT", value: "2525" },
-    { key: "SMTP_USERNAME", value: "user" },
-    { key: "SMTP_PASSWORD", value: "pass" },
-    { key: "SMTP_FROM", value: "no-reply@helix.com" },
-  ];
-
-  for (const s of defaultSettings) {
-    await prisma.settings.upsert({
-      where: { key: s.key },
-      update: {},
-      create: s,
-    });
-  }
-  console.log("✅ Settings seeded");
-
-  console.log("🌱 Starting RBAC Seeding...");
-
-  // 1. Define All Possible Permissions
-  const permissions = [
-    // Settings
-    { slug: "settings.view", description: "View system settings" },
-    {
-      slug: "settings.manage",
-      description: "Update system settings (SMTP, Business Name)",
-    },
-
-    // User Management
-    { slug: "users.view", description: "View user list" },
-    { slug: "users.manage", description: "Ban, delete, or edit users" },
-
-    // Profile Moderation
-    {
-      slug: "profiles.view_pending",
-      description: "View profiles waiting for review",
-    },
-    { slug: "profiles.approve", description: "Approve or Reject profiles" },
-    {
-      slug: "profiles.view_sensitive",
-      description: "View private health/genetic data",
-    },
-
-    // Admin Dashboard
-    { slug: "dashboard.view", description: "View admin analytics" },
-  ];
-
-  // Upsert Permissions
-  for (const p of permissions) {
-    await prisma.permission.upsert({
-      where: { slug: p.slug },
-      update: {},
-      create: p,
-    });
-  }
-
-  // 2. Define Default Roles
-
-  // A. SUPER ADMIN (Has EVERYTHING)
-  const allPermissions = await prisma.permission.findMany();
-
-  await prisma.role.upsert({
-    where: { name: "Super Admin" },
-    update: {
-      permissions: {
-        set: allPermissions.map((p) => ({ id: p.id })), // Link all
-      },
-    },
-    create: {
-      name: "Super Admin",
-      description: "Full system access",
-      isSystem: true,
-      permissions: {
-        connect: allPermissions.map((p) => ({ id: p.id })),
-      },
-    },
-  });
-
-  // B. MODERATOR (Can approve profiles but NOT change Settings)
-  const modPermissions = allPermissions.filter(
-    (p) =>
-      p.slug.startsWith("profiles.") ||
-      p.slug === "users.view" ||
-      p.slug === "dashboard.view"
-  );
-
-  await prisma.role.upsert({
-    where: { name: "Moderator" },
-    update: {
-      permissions: { set: modPermissions.map((p) => ({ id: p.id })) },
-    },
-    create: {
-      name: "Moderator",
-      description: "Can review profiles and view users",
-      permissions: { connect: modPermissions.map((p) => ({ id: p.id })) },
-    },
-  });
-
-  // C. STANDARD USER (No Admin permissions)
-  // Usually empty permissions for the Admin Panel, but we create the role exists
-  await prisma.role.upsert({
-    where: { name: "User" },
-    update: {},
-    create: { name: "User", description: "Standard App User", isSystem: true },
-  });
-
-  console.log("✅ RBAC Roles & Permissions Seeded");
+  console.log("🌱 Seeding Completed Successfully!");
 }
 
 main()

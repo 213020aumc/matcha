@@ -87,15 +87,18 @@ export const updateBackgroundInfo = async (
     const profile = await tx.userProfile.update({
       where: { userId },
       data: {
-        education: data.education,
-        occupation: data.occupation,
-        nationality: data.nationality,
-        diet: data.diet,
-        height: data.height ? parseInt(data.height) : null,
-        weight: data.weight ? parseInt(data.weight) : null,
-        hairColor: data.hairColor,
-        eyeColor: data.eyeColor,
-        bio: data.bio,
+        education: data.education || undefined,
+        occupation: data.occupation || undefined,
+        nationality: data.nationality || undefined,
+        diet: data.diet || undefined,
+        height: data.height ? parseInt(data.height) : undefined,
+        weight: data.weight ? parseInt(data.weight) : undefined,
+        bodyBuild: data.bodyBuild || undefined,
+        hairColor: data.hairColor || undefined,
+        eyeColor: data.eyeColor || undefined,
+        race: data.race || undefined,
+        orientation: data.orientation || undefined,
+        bio: data.bio || undefined,
       },
     });
 
@@ -134,6 +137,7 @@ export const updateHealthHistory = async (
     zikaRisk,
     menstrualRegularity,
     pregnancyHistory,
+    reproductiveConds,
   } = data;
 
   // Mapping to the Schema keys
@@ -163,6 +167,8 @@ export const updateHealthHistory = async (
     menstrualRegularity:
       menstrualRegularity !== undefined ? menstrualRegularity : null,
     pregnancyHistory: pregnancyHistory !== undefined ? pregnancyHistory : null,
+    reproductiveConds:
+      reproductiveConds === "true" || reproductiveConds === true,
   };
 
   return await prisma.$transaction(async (tx) => {
@@ -417,6 +423,11 @@ export const getFullUserProfile = async (userId) => {
       compensation: true,
       legal: true,
       identityDocuments: true,
+      accessRole: {
+        include: {
+          permissions: true,
+        },
+      },
     },
   });
 };

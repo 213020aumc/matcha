@@ -1,16 +1,15 @@
 import jwt from "jsonwebtoken";
 import * as AuthService from "./auth.service.js";
-import { EmailService } from "../../services/emailService.js";
 import catchAsync from "../../utils/catchAsync.js";
 import { AppError } from "../../utils/AppError.js";
 
 const signToken = (id) => {
-  // console.log("🔐 SIGNING SECRET:", process.env.JWT_SECRET);
   return jwt.sign({ id }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || "1d",
+    expiresIn: process.env.JWT_EXPIRES_IN || "7d",
   });
 };
 
+// --- LOGIN: Send OTP ---
 export const login = catchAsync(async (req, res, next) => {
   const { email } = req.body;
 
@@ -18,60 +17,67 @@ export const login = catchAsync(async (req, res, next) => {
     return next(new AppError("Please enter a valid email address", 400));
   }
 
-  const { user, otpCode } = await AuthService.initiateLogin(email);
-
-  try {
-    await new EmailService(user).sendOTP(otpCode);
-  } catch (err) {
-    console.error("Email send failed:", err);
-  }
-
-  if (process.env.NODE_ENV === "development")
-    console.log(`DEV OTP: ${otpCode}`);
+  const result = await AuthService.initiateLogin(email);
 
   res.status(200).json({
     status: "success",
-    message: "OTP sent successfully",
-    email: user.email,
+    message: "OTP sent to your email",
+    data: {
+      email: result.user.email,
+    },
   });
 });
 
+// --- VERIFY OTP ---
 export const verifyOtp = catchAsync(async (req, res, next) => {
   const { email, otp } = req.body;
+
+  if (!email || !otp) {
+    return next(new AppError("Please provide email and OTP", 400));
+  }
+
   const user = await AuthService.verifyOtp(email, otp);
 
-  if (!user) return next(new AppError("Incorrect OTP", 401));
+  if (!user) {
+    return next(new AppError("Invalid or expired OTP", 401));
+  }
 
+  // Sign token
   const token = signToken(user.id);
 
-  // 1. COOKIES
+  // Set cookie
   const cookieOptions = {
-    expires: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
+    expires: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
   };
   res.cookie("jwt", token, cookieOptions);
 
-  // 2. STRICT ROUTING LOGIC
-  let redirectRoute = "/onboarding"; // Default: User is new
+  // Check if user is admin (accessRole is the relation to Role model)
+  const isAdmin =
+    user.accessRole?.name === "Super Admin" ||
+    user.accessRole?.name === "Admin" ||
+    user.accessRole?.name === "Moderator";
 
-  if (user.role) {
-    // If user has a role, they have passed initial onboarding
-    if (user.profileStatus === "ACTIVE") {
-      // Only ACTIVE users go to Home
-      redirectRoute = "/home";
-    } else if (user.profileStatus === "PENDING_REVIEW") {
-      // Waiting for Admin approval
+  // Determine redirect route
+  let redirectRoute = "/onboarding";
+
+  if (isAdmin) {
+    redirectRoute = "/admin";
+  } else if (user.termsAccepted && user.role) {
+    if (user.profileStatus === "PENDING_REVIEW") {
       redirectRoute = "/profile/pending";
+    } else if (user.profileStatus === "ACTIVE") {
+      redirectRoute = "/home";
     } else if (user.profileStatus === "REJECTED") {
-      // Rejected by Admin
       redirectRoute = "/profile/rejected";
     } else {
-      // Status is DRAFT (or null) -> Finish Profile
       redirectRoute = "/profile/complete";
     }
   }
 
+  // Return response with full accessRole including permissions
   res.status(200).json({
     status: "success",
     token,
@@ -80,24 +86,26 @@ export const verifyOtp = catchAsync(async (req, res, next) => {
         id: user.id,
         email: user.email,
         role: user.role,
+        gender: user.gender,
+        serviceType: user.serviceType,
+        interestedIn: user.interestedIn,
+        pairingTypes: user.pairingTypes,
         profileStatus: user.profileStatus,
+        onboardingStep: user.onboardingStep,
+        termsAccepted: user.termsAccepted,
+        accessRole: user.accessRole, // Includes { id, name, permissions: [...] }
       },
-      redirectRoute, // Frontend uses this to navigate
+      redirectRoute,
+      isAdmin,
     },
   });
 });
 
+// --- LOGOUT ---
 export const logout = (req, res) => {
-  // Overwrite the cookie with dummy data and a short expiration
   res.cookie("jwt", "loggedout", {
-    expires: new Date(Date.now() + 10 * 1000), // Expires in 10 seconds
+    expires: new Date(Date.now() + 10 * 1000),
     httpOnly: true,
-    // Ensure these match your login cookie settings exactly
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
   });
-
-  res
-    .status(200)
-    .json({ status: "success", message: "Logged out successfully" });
+  res.status(200).json({ status: "success" });
 };

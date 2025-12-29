@@ -49,7 +49,7 @@ router
 router
   .route("/stage-4/genetic")
   .get(ProfileController.getGeneticInfo)
-  .post(upload.single("report"), ProfileController.updateGenetic);
+  .post(upload.single("geneticReport"), ProfileController.updateGenetic);
 
 // --- STAGE 5 ---
 router

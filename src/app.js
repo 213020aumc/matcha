@@ -22,20 +22,42 @@ const app = express();
 // APPLYING GLOBAL LIMITER to all requests starting with /api
 // app.use("/api", globalLimiter);
 
-// Global Middlewares
-app.use(helmet());
-app.use(cors({ origin: "http://localhost:5173", credentials: true }));
-app.use(express.json({ limit: "10kb" }));
-app.use(express.urlencoded({ extended: true, limit: "10kb" }));
+// --- Security Headers (Modified for cross-origin images) ---
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginEmbedderPolicy: false,
+  })
+);
+
+// --- CORS Configuration ---
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL || "http://localhost:3000",
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+// --- Body Parsers ---
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(cookieParser());
 
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
-
-// (Temporary)
-// app.use((req, res, next) => {
-//   req.user = { id: "PASTE_UUID_FROM_SEED_OUTPUT_HERE" };
-//   next();
-// });
+// --- Static Files (Uploads) with CORS headers ---
+app.use(
+  "/uploads",
+  (req, res, next) => {
+    res.setHeader(
+      "Access-Control-Allow-Origin",
+      process.env.CLIENT_URL || "http://localhost:5173"
+    );
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    next();
+  },
+  express.static(path.join(__dirname, "../uploads"))
+);
 
 // Routes
 app.use("/api/v1/auth", authRoutes);

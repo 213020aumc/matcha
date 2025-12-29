@@ -6,109 +6,123 @@ import prisma from "../config/prisma.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export class EmailService {
-  constructor(user) {
-    this.to = user.email;
-    this.firstName = user.profile?.legalName?.split(" ")[0] || "User";
-    this.from = ""; // Set dynamically
-  }
+// Helper: Fetch settings from DB
+const getSettings = async () => {
+  const settingsArray = await prisma.settings.findMany();
+  return settingsArray.reduce(
+    (acc, curr) => ({ ...acc, [curr.key]: curr.value }),
+    {}
+  );
+};
 
-  // Helper: Fetch settings from DB
-  async getSettings() {
-    const settingsArray = await prisma.settings.findMany();
-    // Convert Array to Object: { "SMTP_HOST": "smtp.mailtrap.io", ... }
-    return settingsArray.reduce(
-      (acc, curr) => ({ ...acc, [curr.key]: curr.value }),
-      {}
-    );
-  }
+// Create email transporter
+const createTransport = async () => {
+  const host = process.env.EMAIL_HOST;
+  const port = process.env.EMAIL_PORT;
+  const user = process.env.EMAIL_USERNAME;
+  const pass = process.env.EMAIL_PASSWORD;
 
-  async createTransport() {
-    // const dbSettings = await this.getSettings();
+  return nodemailer.createTransport({
+    host,
+    port,
+    auth: { user, pass },
+  });
+};
 
-    // LOGIC: Check DB first, if empty/null, use .env
-    // const host = dbSettings.SMTP_HOST || process.env.EMAIL_HOST;
-    // const port = dbSettings.SMTP_PORT || process.env.EMAIL_PORT;
-    // const user = dbSettings.SMTP_USERNAME || process.env.EMAIL_USERNAME;
-    // const pass = dbSettings.SMTP_PASSWORD || process.env.EMAIL_PASSWORD;
-    const host = process.env.EMAIL_HOST;
-    const port = process.env.EMAIL_PORT;
-    const user = process.env.EMAIL_USERNAME;
-    const pass = process.env.EMAIL_PASSWORD;
-
-    // Dynamic Sender Info
-    // const businessName = dbSettings.BUSINESS_NAME || "Helix Platform";
-    // const senderEmail =
-    //   dbSettings.SMTP_FROM || process.env.EMAIL_FROM || "no-reply@helix.com";
-    // this.from = `${businessName} <${senderEmail}>`;
-
-    const businessName = "Helix Platform";
-    const senderEmail = process.env.EMAIL_FROM || "no-reply@helix.com";
-    this.from = `${businessName} <${senderEmail}>`;
-
-    return nodemailer.createTransport({
-      host,
-      port,
-      auth: { user, pass },
-    });
-  }
-
-  async send(template, subject, templateData = {}) {
-    // 1. Fetch Dynamic Content (Business Name, Footer)
-    const dbSettings = await this.getSettings();
+// Generic send email function
+const sendEmail = async (to, template, subject, templateData = {}) => {
+  try {
+    // 1. Fetch Dynamic Content
+    const dbSettings = await getSettings();
     const businessName = dbSettings.BUSINESS_NAME || "Helix";
     const footerText =
       dbSettings.MAIL_FOOTER_TEXT || "Best of Luck, Team Helix";
+    const senderEmail = process.env.EMAIL_FROM || "no-reply@helix.com";
+    const from = `${businessName} <${senderEmail}>`;
 
     // 2. Render Pug Template
-    // Path: src/views/emails/otp.pug
     const html = pug.renderFile(
       path.join(__dirname, `../views/emails/${template}.pug`),
       {
-        firstName: this.firstName,
         businessName,
         footerText,
         subject,
-        ...templateData, // e.g. { otp: '123456' }
+        ...templateData,
       }
     );
 
     // 3. Create Transport & Send
-    const transporter = await this.createTransport();
+    const transporter = await createTransport();
 
     const mailOptions = {
-      from: this.from,
-      to: this.to,
+      from,
+      to,
       subject,
       html,
-      text: html.replace(/<[^>]*>/g, ""), // Strip HTML for plain text
+      text: html.replace(/<[^>]*>/g, ""),
     };
 
     await transporter.sendMail(mailOptions);
+    console.log(`📧 Email sent to ${to}: ${subject}`);
+  } catch (error) {
+    console.error(`Failed to send email to ${to}:`, error.message);
+    throw error;
+  }
+};
+
+// --- EXPORTED FUNCTIONS ---
+
+export const sendOtpEmail = async (email, otp) => {
+  await sendEmail(email, "otp", "Your Verification Code", { otp });
+};
+
+export const sendWelcomeEmail = async (email, firstName) => {
+  await sendEmail(email, "welcome", "Welcome to the Helix Family!", {
+    firstName,
+  });
+};
+
+export const sendProfileActiveEmail = async (email, firstName) => {
+  await sendEmail(
+    email,
+    "profile-active",
+    "Congratulations! 🎉 Your Profile is Active",
+    { firstName }
+  );
+};
+
+export const sendProfileRejectedEmail = async (email, firstName, reason) => {
+  await sendEmail(
+    email,
+    "profile-rejected",
+    "Action Required: Profile Review Update",
+    {
+      firstName,
+      reason,
+    }
+  );
+};
+
+// Legacy Class Export (for backward compatibility)
+export class EmailService {
+  constructor(user) {
+    this.to = user.email;
+    this.firstName = user.profile?.legalName?.split(" ")[0] || "User";
   }
 
   async sendOTP(otp) {
-    await this.send("otp", "Your Verification Code", { otp });
+    await sendOtpEmail(this.to, otp);
   }
 
   async sendWelcome() {
-    await this.send("welcome", "Welcome to the Helix Family!");
+    await sendWelcomeEmail(this.to, this.firstName);
   }
 
   async sendProfileActive() {
-    await this.send(
-      "profile-active",
-      "Congratulations! 🎉 Your Profile is Active"
-    );
+    await sendProfileActiveEmail(this.to, this.firstName);
   }
 
   async sendProfileRejected(reason) {
-    await this.send(
-      "profile-rejected",
-      "Action Required: Profile Review Update",
-      {
-        reason, // Pass the reason to the Pug template
-      }
-    );
+    await sendProfileRejectedEmail(this.to, this.firstName, reason);
   }
 }

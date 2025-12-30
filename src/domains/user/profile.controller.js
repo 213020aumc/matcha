@@ -214,6 +214,7 @@ export const updateGenetic = catchAsync(async (req, res, next) => {
       console.error("Failed to parse conditions:", e);
       parsedConditions = [];
     }
+  }
 
   const result = await ProfileService.updateGeneticProfile(
     req.user.id,

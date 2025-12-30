@@ -63,7 +63,29 @@ router
   .get(ProfileController.getLegalInfo) // Check if already agreed
   .post(ProfileController.completeProfile);
 
-router.get("/current", ProfileController.getCurrentProfile);
+router.get("/me", ProfileController.getMe);
+
+router.patch("/edit", ProfileController.updateUserProfile); // Update profile (Block email)
+
+// --- 2. DOCUMENT EDITING APIs (PATCH) ---
+// Separate endpoints to update specific documents without re-submitting full stages
+router.patch(
+  "/documents/identity",
+  upload.single("document"),
+  ProfileController.editIdentityDoc
+);
+
+router.patch(
+  "/documents/photos",
+  upload.fields([{ name: "baby" }, { name: "current" }]),
+  ProfileController.editPhotos
+);
+
+router.patch(
+  "/documents/genetic-report",
+  upload.single("geneticReport"),
+  ProfileController.editGeneticReport
+);
 
 // === ADMIN ROUTES ===
 

@@ -112,7 +112,7 @@ export const uploadPhotos = catchAsync(async (req, res, next) => {
 // --- STAGE 2: Background ---
 export const updateBackground = catchAsync(async (req, res, next) => {
   const { isComplete, ...data } = req.body;
-  
+
   // Only validate required fields when marking as complete AND user is surrogacy candidate
   if (
     (isComplete === "true" || isComplete === true) &&
@@ -121,7 +121,7 @@ export const updateBackground = catchAsync(async (req, res, next) => {
     // Fetch the user's profile to check for existing dob
     const existingProfile = await prisma.userProfile.findUnique({
       where: { userId: req.user.id },
-      select: { dob: true, height: true, weight: true }
+      select: { dob: true, height: true, weight: true },
     });
 
     const requiredFields = ["height", "weight"];
@@ -197,7 +197,6 @@ export const updateHealth = catchAsync(async (req, res, next) => {
 
 // --- STAGE 4: Genetic ---
 export const updateGenetic = catchAsync(async (req, res, next) => {
-
   // console.log("Received genetic update request");
   // console.log("Body:", req.body);
   // console.log("File:", req.file);
@@ -209,7 +208,8 @@ export const updateGenetic = catchAsync(async (req, res, next) => {
   let parsedConditions = [];
   if (conditions) {
     try {
-      parsedConditions = typeof conditions === 'string' ? JSON.parse(conditions) : conditions;
+      parsedConditions =
+        typeof conditions === "string" ? JSON.parse(conditions) : conditions;
     } catch (e) {
       console.error("Failed to parse conditions:", e);
       parsedConditions = [];
@@ -358,8 +358,31 @@ export const getLegalInfo = catchAsync(async (req, res) => {
   res.status(200).json({ status: "success", data });
 });
 
-// GET /api/v1/user/profile/current
-export const getCurrentProfile = catchAsync(async (req, res, next) => {
+export const updateUserProfile = catchAsync(async (req, res, next) => {
+  const { email, ...updates } = req.body;
+
+  // 1. Security Check
+  if (email) {
+    return next(
+      new AppError("Email cannot be updated via this endpoint.", 400)
+    );
+  }
+
+  // 2. Call Comprehensive Service
+  // This single call handles Gender (User), Bio (Profile), Diabetes (Health), Price (Comp), etc.
+  const updatedUser = await ProfileService.updateComprehensiveProfile(
+    req.user.id,
+    updates
+  );
+
+  res.status(200).json({
+    status: "success",
+    message: "Profile updated successfully",
+    data: updatedUser,
+  });
+});
+
+export const getMe = catchAsync(async (req, res, next) => {
   // 1. Fetch EVERYTHING about the user
   const user = await ProfileService.getFullUserProfile(req.user.id);
 
@@ -367,20 +390,76 @@ export const getCurrentProfile = catchAsync(async (req, res, next) => {
     return next(new AppError("User not found", 404));
   }
 
-  // 2. EXPLICIT STATE FROM DB
-  // No longer guessing based on fields. The 'onboardingStep' column is the source of truth.
+  // 2. Calculate Metadata (useful for frontend logic)
   const currentStep = user.onboardingStep || 0;
 
-  // 3. SEND RESPONSE
   res.status(200).json({
     status: "success",
     data: {
-      user,
-      lastCompletedStep: currentStep,
-      // If they finished step 2, we suggest step 3.
-      suggestedStage: currentStep + 1,
-      // Fully complete if they hit the final step (6)
-      isComplete: currentStep >= 6,
+      user, // <--- this Object to pre-fill User Edit Form
+      meta: {
+        lastCompletedStep: currentStep,
+        suggestedStage: currentStep + 1,
+        isComplete: currentStep >= 6,
+      },
     },
+  });
+});
+
+export const editIdentityDoc = catchAsync(async (req, res, next) => {
+  if (!req.file) return next(new AppError("No document file provided", 400));
+  if (!req.body.type)
+    return next(new AppError("Document type is required", 400));
+
+  const fileUrl = getFileUrl(req, req.file);
+  const result = await ProfileService.saveIdentityDoc(
+    req.user.id,
+    req.body.type,
+    fileUrl
+  );
+
+  res.status(200).json({
+    status: "success",
+    message: "Identity document updated",
+    data: result,
+  });
+});
+
+export const editPhotos = catchAsync(async (req, res, next) => {
+  const photoUrls = {};
+  if (req.files?.["baby"]?.[0])
+    photoUrls.babyPhotoUrl = getFileUrl(req, req.files["baby"][0]);
+  if (req.files?.["current"]?.[0])
+    photoUrls.currentPhotoUrl = getFileUrl(req, req.files["current"][0]);
+
+  if (Object.keys(photoUrls).length === 0)
+    return next(new AppError("No photos provided", 400));
+
+  const result = await ProfileService.updateProfilePhotos(
+    req.user.id,
+    photoUrls,
+    false
+  );
+  res
+    .status(200)
+    .json({ status: "success", message: "Photos updated", data: result });
+});
+
+export const editGeneticReport = catchAsync(async (req, res, next) => {
+  if (!req.file)
+    return next(new AppError("No genetic report file provided", 400));
+
+  const fileUrl = getFileUrl(req, req.file);
+  const result = await ProfileService.updateGeneticProfile(
+    req.user.id,
+    null,
+    fileUrl,
+    false
+  );
+
+  res.status(200).json({
+    status: "success",
+    message: "Genetic report updated",
+    data: result,
   });
 });

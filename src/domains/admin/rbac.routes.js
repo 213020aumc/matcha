@@ -1,7 +1,12 @@
 import { Router } from "express";
-import * as RbacController from "./rbac.controller.js"; // Ensure this matches your file structure
+import * as RbacController from "./rbac.controller.js";
 import { protect } from "../../middleware/authMiddleware.js";
 import { requirePermission } from "../../middleware/rbacMiddleware.js";
+import { validate } from "../../utils/validate.js";
+import {
+  createRoleSchema,
+  assignRoleSchema,
+} from "../../validations/rbac.validation.js";
 
 const router = Router();
 
@@ -32,6 +37,7 @@ router.get(
 router.post(
   "/roles",
   requirePermission("users.manage"),
+  validate(createRoleSchema),
   RbacController.createRole
 );
 
@@ -39,6 +45,7 @@ router.post(
 router.post(
   "/assign",
   requirePermission("users.manage"),
+  validate(assignRoleSchema),
   RbacController.assignRole
 );
 

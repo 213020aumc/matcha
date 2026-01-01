@@ -5,6 +5,21 @@ import { upload } from "../../utils/upload.js";
 import * as ProfileController from "./profile.controller.js";
 import { protect } from "../../middleware/authMiddleware.js";
 import { requirePermission } from "../../middleware/rbacMiddleware.js";
+import { validate } from "../../utils/validate.js";
+import {
+  onboardingSchema,
+  basicInfoSchema,
+  identityDocSchema,
+  photosSchema,
+  backgroundSchema,
+  healthSchema,
+  geneticSchema,
+  compensationSchema,
+  completeProfileSchema,
+  editProfileSchema,
+  approveProfileSchema,
+  userIdParamSchema,
+} from "../../validations/profile.validation.js";
 
 const router = Router();
 
@@ -12,66 +27,84 @@ const router = Router();
 router.use(protect);
 
 // ONBOARDING ENDPOINT
-router.put("/onboarding", ProfileController.submitOnboarding);
+router.put(
+  "/onboarding",
+  validate(onboardingSchema),
+  ProfileController.submitOnboarding
+);
 
 // --- STAGE 1 ---
 router
   .route("/stage-1/basics")
-  .get(ProfileController.getBasicInfo) // CHECK: Does data exist?
-  .post(ProfileController.updateBasicInfo); // SAVE: Create or Update
+  .get(ProfileController.getBasicInfo)
+  .post(validate(basicInfoSchema), ProfileController.updateBasicInfo);
 
 router
   .route("/stage-1/identity")
   .get(ProfileController.getIdentity)
-  .post(upload.single("document"), ProfileController.uploadIdentityDoc);
+  .post(
+    upload.single("document"),
+    validate(identityDocSchema),
+    ProfileController.uploadIdentityDoc
+  );
 
 router
   .route("/stage-1/photos")
   .get(ProfileController.getPhotos)
   .post(
     upload.fields([{ name: "baby" }, { name: "current" }]),
+    validate(photosSchema),
     ProfileController.uploadPhotos
   );
 
-// --- STAGE 2 ---
+// --- STAGE 2: Background ---
 router
   .route("/stage-2/background")
   .get(ProfileController.getBackgroundInfo)
-  .post(ProfileController.updateBackground);
+  .post(validate(backgroundSchema), ProfileController.updateBackground);
 
-// --- STAGE 3 ---
+// --- STAGE 3: Health ---
 router
   .route("/stage-3/health")
   .get(ProfileController.getHealthInfo)
-  .post(ProfileController.updateHealth);
+  .post(validate(healthSchema), ProfileController.updateHealth);
 
-// --- STAGE 4 ---
+// --- STAGE 4: Genetic ---
 router
   .route("/stage-4/genetic")
   .get(ProfileController.getGeneticInfo)
-  .post(upload.single("geneticReport"), ProfileController.updateGenetic);
+  .post(
+    upload.single("geneticReport"),
+    validate(geneticSchema),
+    ProfileController.updateGenetic
+  );
 
-// --- STAGE 5 ---
+// --- STAGE 5: Compensation ---
 router
   .route("/stage-5/compensation")
   .get(ProfileController.getCompensationInfo)
-  .post(ProfileController.updateCompensation);
+  .post(validate(compensationSchema), ProfileController.updateCompensation);
 
-// --- STAGE 6 ---
+// --- STAGE 6: Complete ---
 router
   .route("/stage-6/complete")
-  .get(ProfileController.getLegalInfo) // Check if already agreed
-  .post(ProfileController.completeProfile);
+  .get(ProfileController.getLegalInfo)
+  .post(validate(completeProfileSchema), ProfileController.completeProfile);
 
+// --- User Profile ---
 router.get("/me", ProfileController.getMe);
 
-router.patch("/edit", ProfileController.updateUserProfile); // Update profile (Block email)
+router.patch(
+  "/edit",
+  validate(editProfileSchema),
+  ProfileController.updateUserProfile
+);
 
-// --- 2. DOCUMENT EDITING APIs (PATCH) ---
-// Separate endpoints to update specific documents without re-submitting full stages
+// --- Document Editing APIs ---
 router.patch(
   "/documents/identity",
   upload.single("document"),
+  validate(identityDocSchema),
   ProfileController.editIdentityDoc
 );
 
@@ -88,17 +121,17 @@ router.patch(
 );
 
 // === ADMIN ROUTES ===
-
-// 1. View Pending Profiles
 router.get(
   "/admin/pending",
-  requirePermission("profiles.view_pending"), // RBAC Check
+  requirePermission("profiles.view_pending"),
   ProfileController.getPendingProfiles
 );
+
 router.patch(
   "/admin/approve/:userId",
-  protect,
   requirePermission("profiles.approve"),
+  validate(userIdParamSchema, "params"),
+  validate(approveProfileSchema),
   ProfileController.approveProfile
 );
 
